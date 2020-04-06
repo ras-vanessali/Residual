@@ -23,8 +23,8 @@ library(stringr)
 
 ############################## Declare inputs #####################################
 
-DBserver = 'production'
-#DBserver = 'rasquery'
+#DBserver = 'production'
+DBserver = 'rasquery'
 
 CountryCode='USA'
 stdInd=3
@@ -42,257 +42,27 @@ BestEcon_cap = 1.0005
 
 Econ_gap = 0.15
 publishDate<-Sys.Date() - days(day(Sys.Date()))
-#publishDate='2019-11-30'
 
 ## file path & read file name 
-file_path = "H:/Projects/75_ResidualCurve/2020Jan"
+file_path = "C:/Users/vanessa.li/Documents/GitHub/Residual"
 setwd(file_path)  
-excelfile = '20200211 SchedulesManagement.xlsx'
+excelfile = '20200331 SchedulesManagement.xlsx'
 
-################################## Load data #####################################
+##################################### Load data #####################################
+runSQL<-parse('SQLqueries.r')
+eval(runSQL)
 
-### Cost data
 channel<-odbcConnect(DBserver)
-uploadData<-sqlQuery(channel,"
-                                         
- SET NOCOUNT ON                    
-	Declare @dateEffective DATE = CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1) AS date)
-	Declare @dateStart DATE = 	CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-145, -1) AS date)
-	
-SELECT [CustomerAssetId]
-      ,[CustomerId]
-      ,[CustomerName]
-      ,[EquipNo]
-      ,[CategoryId]
-      ,[CategoryName]
-      ,[SubcategoryId]
-      ,[SubcategoryName]
-      ,[MakeId]
-      ,[MakeName]
-      ,[ModelId]
-      ,[ModelName]
-      ,[ModelYear]
-      ,[AcquisitionDate]
-      ,[Cost]
-      ,[CurrentABCost]
-	    ,CurrentABCost/Cost as CostRatio
-      ,CAST(YEAR(@dateEffective)-ModelYear + (MONTH(@dateEffective)-6)/12.00 as decimal(10,4))  as Age
-	   ,CASE                    
-             WHEN ([CurrentABCost]/Cost > 1.25+0.125*(YEAR(@dateEffective)-ModelYear + (MONTH(@dateEffective)-6)/12.00)
-			    OR [CurrentABCost]/Cost < 0.75+0.015*(YEAR(@dateEffective)-ModelYear + (MONTH(@dateEffective)-6)/12.00)) THEN 'EcxRegr'
-             ELSE 'inUse' END AS 'Flag'
-  FROM [ras_sas].[BI].[CustomerAssetsCost] 
-  WHERE  [IsUsedForABCost]='Y' and [IsPurchasedUsed]='N' 
-    AND CategoryId Not In (220,	1948,	18,	4,	1949,	234,	21,	31,	2733,	2706,	2718,	2692,	2724,	2674,	2700,	2708)
-    AND MakeId NOT in (58137,78) --Miscellaneous,Not Attributed,Various
-		AND NOT ([SubcategoryId] in (2806,2808,2001,2636) and makeid=31 and ModelName not like 'XQ%')  
-	AND AcquisitionDate > @dateStart and AcquisitionDate<=@dateEffective
-    AND CurrentABCost is not NULL 
-	  AND Cost>10
-	  AND NOT(CustomerId = 178 And (Equipno like 'N%' or Equipno like '%NF'))")
+uploadData<-sqlQuery(channel,uploadData.sql)
+recessionYr.ret<-sqlQuery(channel,recessionYr.ret.sql)
+currentYr.ret<-sqlQuery(channel,currentYr.ret.sql)
+bestYr.ret<-sqlQuery(channel,bestYr.ret.sql)
+recessionYr.auc<-sqlQuery(channel,recessionYr.auc.sql)
+currentYr.auc<-sqlQuery(channel,currentYr.auc.sql)
+bestYr.auc<-sqlQuery(channel,bestYr.auc.sql)
+AllClass<-sqlQuery(channel,AllClass.sql)
+LastMonth<-sqlQuery(channel,LastMonth.sql)
 
-##################################### Retail Econ Factor ###########################################
-recessionYr.ret<-sqlQuery(channel," SET NOCOUNT ON
-select  CategoryId,CategoryName, SubcategoryId,SubcategoryName, MakeId, MakeName,ModelYear,cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0)) as yearAge, avg(SalePrice/Cost) SPCost,Count(*) Units
-from [ras_sas].[BI].Comparables 
-where saletype = 'retail' and IsUsedForComparables='y'
-	  and SaleYear = 2009
-	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 >3
-	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 <10
-	  and cost /CurrentABCost<2 and cost/CurrentABCost>.5
-	  and SalePrice/M1PrecedingFmv <1.4 and SalePrice/M1PrecedingFmv >.6
-	  and SalePrice/Cost < 1
-	  and COST>5
-	  AND CategoryId Not In (220,	1948,	18,	4,	1949,	234,	21,	31,	2733,	2706,	2718,	2692,	2724,	2674,	2700,	2708)
-      AND MakeId NOT in (58137,78) --Miscellaneous,Not Attributed,Various
-      AND NOT ([SubcategoryId] in (2806,2808,2001,2636) and makeid=31 and ModelName not like 'XQ%')
-group by CategoryId,CategoryName, SubcategoryId,SubcategoryName, MakeId, MakeName,ModelYear,cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0))	")
-
-
-
-currentYr.ret<-sqlQuery(channel," SET NOCOUNT ON
-Declare @dateStart DATE = CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, DATEADD(year,-1,GETDATE()))-1, -1) as date)
-Declare @dateEnd DATE = CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1) AS date)
-
-SELECT  CategoryId,CategoryName, SubcategoryId,SubcategoryName,MakeId, MakeName, ModelYear, cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0)) as yearAge,avg(SalePrice/Cost) SPCost,Count(*) Units
-from [ras_sas].[BI].Comparables 
-where saletype = 'retail' and IsUsedForComparables='y'
-	  and SaleDate >@dateStart and SaleDate<=@dateEnd
-	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 >3
-	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 <10
-	  and cost /CurrentABCost<2 and cost/CurrentABCost>.5
-	  and SalePrice/Cost < 1
-	  and SalePrice/M1PrecedingFmv <1.4 and SalePrice/M1PrecedingFmv >.6
-	  and COST>5
-	  AND CategoryId Not In (220,	1948,	18,	4,	1949,	234,	21,	31,	2733,	2706,	2718,	2692,	2724,	2674,	2700,	2708)
-      AND MakeId NOT in (58137,78) --Miscellaneous,Not Attributed,Various
-      AND NOT ([SubcategoryId] in (2806,2808,2001,2636) and makeid=31 and ModelName not like 'XQ%')
-group by CategoryId,CategoryName, SubcategoryId,SubcategoryName, MakeId, MakeName, ModelYear,cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0))	")
-
-
-bestYr.ret<-sqlQuery(channel," SET NOCOUNT ON
-	 select  CategoryId,CategoryName, SubcategoryId,SubcategoryName, MakeId, MakeName, SaleYear, ModelYear, cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0)) as yearAge,avg(SalePrice/Cost) SPCost,Count(*) Units
-from [ras_sas].[BI].Comparables 
-where saletype = 'retail' and IsUsedForComparables='y'
-	  and SaleYear between 2016 and 2018
-	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 >3
-	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 <10
-	  and cost /CurrentABCost<2 and cost/CurrentABCost>.5
-	  and SalePrice/Cost < 1
-	  and SalePrice/M1PrecedingFmv <1.4 and SalePrice/M1PrecedingFmv >.6
-	  and COST>5
-	  AND CategoryId Not In (220,	1948,	18,	4,	1949,	234,	21,	31,	2733,	2706,	2718,	2692,	2724,	2674,	2700,	2708)
-      AND MakeId NOT in (58137,78) --Miscellaneous,Not Attributed,Various
-      AND NOT ([SubcategoryId] in (2806,2808,2001,2636) and makeid=31 and ModelName not like 'XQ%')
-group by CategoryId,CategoryName, SubcategoryId,SubcategoryName, MakeId, MakeName, SaleYear,ModelYear,cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0))	")
-
-
-
-##################################### Auction Econ Factor ###########################################
-recessionYr.auc<-sqlQuery(channel," SET NOCOUNT ON
-SELECT [ClassificationId]
-      ,[CategoryId]
-      ,[CategoryName]
-      ,[SubcategoryId]
-      ,[SubcategoryName]
-      ,[MakeId]
-      ,[MakeName]
-      ,[PublishYear]
-      ,[ModelYear]
-      ,avg([FlvSchedulePercentage]) AvgFlv
-      ,avg([FmvSchedulePercentage]) AvgFmv
-  FROM [ras_sas].[BI].[AppraisalBookClassificationValues]
-  where AppraisalBookPublishDate between '2009-03-31' and '2009-12-31' and ModelId is null AND ModelYear between PublishYear-10 and PublishYear-3
-   AND CategoryId Not In (220,	1948,	18,	4,	1949,	234,	21,	31,	2733,	2706,	2718,	2692,	2724,	2674,	2700,	2708)
-   AND MakeId NOT in (58137,78) --Miscellaneous,Not Attributed,Various
-   Group By [ClassificationId]
-      ,[CategoryId]
-      ,[CategoryName]
-      ,[SubcategoryId]
-      ,[SubcategoryName]
-      ,[MakeId]
-      ,[MakeName]
-	  ,[PublishYear]
-      ,[ModelYear]")
-
-
-currentYr.auc<-sqlQuery(channel," SET NOCOUNT ON
-Declare @EffectiveDate Date = CAST(DATEADD(MONTH, DATEDIFF(MONTH, 0, GETDATE())-1, -1) AS date)
-
-SELECT [ClassificationId]
-      ,[CategoryId]
-      ,[CategoryName]
-      ,[SubcategoryId]
-      ,[SubcategoryName]
-      ,[MakeId]
-      ,[MakeName]
-      ,[PublishYear]
-      ,[ModelYear]
-      ,avg([FlvSchedulePercentage]) AvgFlv
-      ,avg([FmvSchedulePercentage]) AvgFmv
-  FROM [ras_sas].[BI].[AppraisalBookClassificationValues]
-
-  where [AppraisalBookPublishDate] = @EffectiveDate and ModelId is null AND ModelYear between PublishYear-10 and PublishYear-3
-   AND CategoryId Not In (220,	1948,	18,	4,	1949,	234,	21,	31,	2733,	2706,	2718,	2692,	2724,	2674,	2700,	2708)
-   AND MakeId NOT in (58137,78) --Miscellaneous,Not Attributed,Various
-   Group By [ClassificationId]
-      ,[CategoryId]
-      ,[CategoryName]
-      ,[SubcategoryId]
-      ,[SubcategoryName]
-      ,[MakeId]
-      ,[MakeName]
-	  ,[PublishYear]
-      ,[ModelYear]	")
-
-
-bestYr.auc<-sqlQuery(channel," SET NOCOUNT ON
-	 SELECT [ClassificationId]
-      ,[CategoryId]
-      ,[CategoryName]
-      ,[SubcategoryId]
-      ,[SubcategoryName]
-      ,[MakeId]
-      ,[MakeName]
-      ,[PublishYear]
-      ,[ModelYear]
-      ,avg([FlvSchedulePercentage]) AvgFlv
-      ,avg([FmvSchedulePercentage]) AvgFmv
-  FROM [ras_sas].[BI].[AppraisalBookClassificationValues]
-  where publishyear between 2016 and 2018 and ModelId is null AND ModelYear between PublishYear-10 and PublishYear-3
-   AND CategoryId Not In (220,	1948,	18,	4,	1949,	234,	21,	31,	2733,	2706,	2718,	2692,	2724,	2674,	2700,	2708)
-   AND MakeId NOT in (58137,78) --Miscellaneous,Not Attributed,Various
-   Group By [ClassificationId]
-      ,[CategoryId]
-      ,[CategoryName]
-      ,[SubcategoryId]
-      ,[SubcategoryName]
-      ,[MakeId]
-      ,[MakeName]
-	  ,[PublishYear]
-      ,[ModelYear]")
-
-
-### import a table with all classifications
-AllClass<-sqlQuery(channel,"
-SET NOCOUNT ON
-Drop TABLE IF EXISTS #CSlevel
-  SELECT [ClassificationId]
-      ,[CategoryId]
-      ,[SubcategoryId]
-  INTO #CSlevel
-  FROM [ras_sas].[BI].[Classifications]
-  where MakeId IS NULL AND SubcategoryId IS NOT NULL
-  
-Drop TABLE IF EXISTS #Clevel
-SELECT [ClassificationId]
-      ,[CategoryId]
-  INTO #Clevel
-  FROM [ras_sas].[BI].[Classifications]
-  where SubcategoryId IS NULL AND CategoryId IS NOT NULL
-
-
-SELECT BIC.[ClassificationId]
-      ,BIC.[CategoryId]
-      ,BIC.[CategoryName]
-      ,BIC.[SubcategoryId]
-      ,BIC.[SubcategoryName]
-      ,BIC.[MakeId]
-      ,BIC.[MakeName]
-	  ,CSL.[ClassificationId] CS_ClassId
-	  ,CL.[ClassificationId] C_ClassId
-  FROM (select * from [ras_sas].[BI].[Classifications] where ModelId IS NULL And NOT(Categoryid IN (220,1948,21) OR CategoryName LIKE 'DO NOT USE%')) BIC
-  LEFT JOIN #CSlevel  CSL
-  on BIC.CategoryId = CSL.CategoryId AND BIC.SubcategoryId = CSL.SubcategoryId
-  LEFT JOIN #Clevel CL
-  on BIC.CategoryId = CL.CategoryId
-  order by BIC.[CategoryName]
-      ,BIC.[SubcategoryName]
-      ,BIC.[MakeName]
-")
-
-
-### Import last month values
-LastMonth<-sqlQuery(channel," SET NOCOUNT ON
-Declare @EffectiveDate date = CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-2, -1) AS date)
-SELECT [MarketCode]
-      ,[ClassificationID] ClassificationId
-      ,[CategoryId]
-      ,[CategoryName]
-      ,[SubcategoryId]
-      ,[SubcategoryName]
-      ,[MakeId]
-      ,[MakeName]
-      ,[ResidSf]
-      ,RetailEconSfBest	
-      ,RetailEconSfWorst	
-      ,AuctionEconSfBest	
-      ,AuctionEconSfWorst
-      ,[AppraisalBookIssueID]
-      ,[AppraisalBookPublishDate]
-  FROM [ras_sas].[BI].[AppraisalBookResidFactorsMKT]
-  WHERE [AppraisalBookPublishDate] = @EffectiveDate           
-                    ")
 
 ################################## Functions ####################################
 
@@ -564,7 +334,7 @@ comb_current.auc<-sched.aggr(currentYr.auc,inAll,'Auction','') %>%
 ############## Worst Econ
 ## join worst year and current year & calculate the worst econ factor
 worstEcon_calc.auc<-merge(comb_recession.auc,comb_current.auc,by=c('Schedule')) %>%
-  mutate(avg.r = pmin(1,recession.r/current.r)) %>%
+  mutate(avg.r = pmin(WorstEcon_cap,recession.r/current.r)) %>%
   select(Schedule,avg.r)
 
 WorstEcon_out.auc<-merge(worstEcon_calc.auc,SchedFullList,by='Schedule',all.y=T) 
@@ -578,7 +348,7 @@ WE_outvf.auc<-merge(inherit.fact(WorstEcon_out.auc),WE_outvf,by='ClassificationI
 
 ############## Best Econ 
 BestEcon_calc.auc<-merge(comb_best.auc,comb_current.auc,by=c('Schedule')) %>%
-  mutate(avg.r = pmax(1,best.r/current.r)) %>%
+  mutate(avg.r = pmax(BestEcon_cap,best.r/current.r)) %>%
   select(Schedule,PublishYear.x,avg.r)
 
 
@@ -592,9 +362,34 @@ BE_outvf.auc<-merge(inherit.fact(BestEcon_out.auc),BE_outvf,by='ClassificationId
   mutate(SFBestAuction = as.numeric(avg.r) * as.numeric(SFBestRetail)) %>%
   select(ClassificationId,SFBestAuction)
 
+"""
+AllClass<-'
 
 
+  SELECT [ClassificationId]
+      ,[CategoryId]
+      
+  FROM [ras_sas].[BI].[Classifications]
+  Where  Modelid is null
 
+  Order By 
+      [ClassificationId]
+      ,[CategoryId]'
+      
+Allclass<-sqlQuery(channel,AllClass) 
+
+residTbmerge<-merge(merge(merge(merge(join_out,BE_outvf,by='ClassificationId'), WE_outvf ,by='ClassificationId'), BE_outvf.auc,by='ClassificationId'),WE_outvf.auc,by='ClassificationId') 
+residTb<-merge(Allclass,residTbmerge,by='ClassificationId') %>%
+  mutate(SFWorstAuction = ifelse(CategoryId %in% c(2515, 360, 29, 362, 15, 6, 2509, 2505, 32, 2599, 164),SFWorstAuction / .96, ifelse(CategoryId ==2616, SFWorstAuction / .90,SFWorstAuction / .93)),
+         SFBestAuction = ifelse(CategoryId %in% c(2515, 360, 29, 362, 15, 6, 2509, 2505, 32, 2599, 164),SFBestAuction / .96, ifelse(CategoryId ==2616, SFBestAuction / .90,SFBestAuction / .93))) %>%
+  mutate(SFWorstAuction = pmin(SFWorstAuction, WorstEcon_cap),
+         SFBestAuction = pmax(SFBestAuction,BestEcon_cap)) %>%
+  select(-CategoryId) %>%
+# best and worst are at least .15 apart. fix best and twist worst
+  mutate(SFWorstRetail = pmin(SFWorstRetail, as.numeric(SFBestRetail) - Econ_gap),SFWorstAuction = pmin(SFWorstAuction, as.numeric(SFBestAuction) - Econ_gap)) %>%
+  select(MarketCode,	ClassificationId,everything())
+
+"""
 ################################# Output file ###################################
 
 
@@ -603,7 +398,6 @@ residTb<-merge(merge(merge(merge(join_out,BE_outvf,by='ClassificationId'), WE_ou
   # best and worst are at least .15 apart. fix best and twist worst
   mutate(SFWorstRetail = pmin(SFWorstRetail, as.numeric(SFBestRetail) - Econ_gap),SFWorstAuction = pmin(SFWorstAuction, as.numeric(SFBestAuction) - Econ_gap)) %>%
   select(MarketCode,	ClassificationId,everything())
-
 
 #### last month values 
 LMtb <-LastMonth %>% select(MarketCode,ClassificationId,ResidSf,RetailEconSfBest, RetailEconSfWorst, AuctionEconSfBest, AuctionEconSfWorst) %>%
