@@ -62,7 +62,8 @@ Declare @dateEnd DATE = CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1
 SELECT  CategoryId,CategoryName, SubcategoryId,SubcategoryName,MakeId, MakeName, ModelYear, cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0)) as yearAge,avg(SalePrice/Cost) SPCost,Count(*) Units
 from [ras_sas].[BI].Comparables 
 where saletype = 'retail' and IsUsedForComparables='y'
-	  and SaleDate >@dateStart and SaleDate<=@dateEnd
+	  --and SaleDate >@dateStart and SaleDate<=@dateEnd
+	  and SaleDate>='2020-03-01' and SaleDate<='2020-03-31'
 	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 >3
 	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 <10
 	  and cost /CurrentABCostUSNA<2 and cost/CurrentABCostUSNA>.5
