@@ -45,6 +45,11 @@ BI.AppraisalBookResidFactorsMKT
 - current: most recent publish (M1)
 - best: average schedules of either 2016 or 2017 or 2018; pick the best by comparison
 
+##### recency factor for econ factors (retail)
+- the factor will applied on the econ factor before capped 
+- the calculation uses the rolling 12 months data which been used for current
+- how: depreciate the average SP/cost of 12 months by 5.5 months, `avg12m = avg(sp/cost) * .99^5.5` for each model year, and compare the results to average SP/cost of the latest month `r = avgrecent/avg12m`. Finally, do the weighted average across years to get the recency factor
+
 
 
 
