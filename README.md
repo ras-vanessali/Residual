@@ -25,27 +25,27 @@ BI.AppraisalBookClassificationValuesUSNA
 BI.AppraisalBookResidFactorsMKT
 ```
 ### what data been used?
-#### residual factor:
+a) residual factor:
 - uploadData: Cost data from BI.CustomerAssetsCost, rolling 12 years with cost greater than 10; purchase in new and is used for ABCost
 
-#### econ factor:
+b) econ factor:
 - machine age between 3 to 10 
 - cost/CurrentABCost between .5 and 2
 - SP/M1value between .6 and 1.4
 - SP/Cost less than 1
 - Cost greater than 5
 --------------------------------------
-##### retail econ factor:
+#### retail econ factor:
 - worst: saleyear = 2019
 - current: rolling 12 months sales data
 - best: choose among 2016, 2017 and 2018 
 
-##### auction econ factor:
+#### auction econ factor:
 - worst: average schedules of 3/31/2009 to 12/31/2009, age between 3 to 10.
 - current: most recent publish (M1)
 - best: average schedules of either 2016 or 2017 or 2018; pick the best by comparison
 
-##### recency factor for econ factors (retail)
+#### recency factor for econ factors (retail)
 - the factor will applied on the econ factor before capped 
 - the calculation uses the rolling 12 months data which been used for current
 - how: depreciate the average SP/cost of 12 months by 5.5 months, `avg12m = avg(sp/cost) * .99^5.5` for each model year, and compare the results to average SP/cost of the latest month `r = avgrecent/avg12m`. Finally, do the weighted average across years to get the recency factor
