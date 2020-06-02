@@ -1,13 +1,16 @@
 ## change 11/30/2019
-#1. residual factor: data pull by acquisition date 12/1/2006 to 11/30/2019 ok
-#2. econ factor: match up by age instead of year ok
-#3. use avg avg with proper weight instead of sum avg ok
-#4. best year for different schedule, check 2018, 2017, 2016: max(T12 vs 2018, T12 vs 2017) ok
+#1. residual factor: data pull by acquisition date 12/1/2006 to 11/30/2019
+#2. econ factor: match up by age instead of year
+#3. use avg avg with proper weight instead of sum avg
+#4. best year for different schedule, check 2018, 2017, 2016: max(T12 vs 2018, T12 vs 2017)
 
 ##change 1/3/2020
 # add auction econ factors
 
-## coming: Add 2019 econ factors
+## change 4/30
+#1. add recency factor for retail side. 
+#2. change the view from CV to inprogress for auction side to use the current month schedule
+#3. change the way to weight the average.
 ############################## Install packages #################################
 
 library(RODBC)
@@ -18,13 +21,13 @@ library(dplyr)
 library(tidyr)
 library(tibble)
 library(lubridate)
-library(readxl)
+library(xlsx)
 library(stringr)
 
 ############################## Declare inputs #####################################
 
-#DBserver = 'production'
-DBserver = 'rasquery'
+DBserver = 'production'
+#DBserver = 'rasquery'
 
 CountryCode='USA'
 stdInd=3
@@ -42,16 +45,18 @@ BestEcon_cap = 1.0005
 
 Econ_gap = 0.15
 publishDate<-Sys.Date() - days(day(Sys.Date()))
+MbefpubDate<-publishDate%m-% months(1)
 
 ## file path & read file name 
 file_path = "C:/Users/vanessa.li/Documents/GitHub/Residual"
 setwd(file_path)  
-excelfile = '20200331 SchedulesManagement.xlsx'
+excelfile = '20200506 SchedulesManagement.xlsx'
 
 ##################################### Load data #####################################
 runSQL<-parse('SQLqueries.r')
 eval(runSQL)
 
+starttime<-Sys.time()
 channel<-odbcConnect(DBserver)
 uploadData<-sqlQuery(channel,uploadData.sql)
 recessionYr.ret<-sqlQuery(channel,recessionYr.ret.sql)
@@ -62,99 +67,24 @@ currentYr.auc<-sqlQuery(channel,currentYr.auc.sql)
 bestYr.auc<-sqlQuery(channel,bestYr.auc.sql)
 AllClass<-sqlQuery(channel,AllClass.sql)
 LastMonth<-sqlQuery(channel,LastMonth.sql)
+endtime<-Sys.time()
+endtime-starttime
 
-
-################################## Functions ####################################
-
-sched.aggr<-function(data.df,in.df,stype,target){
-  retsele.best<-c('Schedule','SaleYear','ModelYear', 'yearAge', 'Units','SPCost')
-  retsele.other<-c('Schedule','ModelYear', 'yearAge', 'Units','SPCost')
-  aucsele<-c('Schedule','PublishYear' ,'ModelYear', 'AvgFlv','AvgFmv')
-  
-  Catlevel<-in.df %>% filter(Level2 =='Category') %>% select(-SubcategoryId,-MakeId)
-  Subcatlevel<-in.df %>% filter(Level2 == "SubcatGroup") %>% select(-MakeId)
-  Makelevel<-in.df %>% filter(Level2 =='Make')
-  
-  if (stype == 'Retail'){
-    if(target == 'best'){
-      cat <- merge(data.df,Catlevel, by=c('CategoryId')) %>% select(retsele.best) 
-      subcat <- merge(data.df,Subcatlevel, by=c('CategoryId',"SubcategoryId")) %>% select(retsele.best) 
-      make <- merge(data.df,Makelevel, by=c('CategoryId',"SubcategoryId",'MakeId')) %>% select(retsele.best) }
-    else{
-      cat <- merge(data.df,Catlevel, by=c('CategoryId')) %>% select(retsele.other) 
-      subcat <- merge(data.df,Subcatlevel, by=c('CategoryId',"SubcategoryId")) %>% select(retsele.other) 
-      make <- merge(data.df,Makelevel, by=c('CategoryId',"SubcategoryId",'MakeId')) %>% select(retsele.other) }
-    }
-  
-  else {
-    cat <- merge(data.df,Catlevel, by=c('CategoryId')) %>% select(aucsele) 
-    subcat <- merge(data.df,Subcatlevel, by=c('CategoryId',"SubcategoryId")) %>% select(aucsele) 
-    make <- merge(data.df,Makelevel, by=c('CategoryId',"SubcategoryId",'MakeId')) %>% select(aucsele)
-  }
-  return(rbind(cat,subcat,make))
-}
-
-
-bestEconfunc<- function(best.df,cur.df,year){
-  
-  result <- merge(best.df %>% filter(SaleYear ==year),cur.df,by=c('Schedule','yearAge')) %>%
-    mutate(ratio = avg.x/avg.y, units_N = totalunits.x + totalunits.y) %>%
-    group_by(Schedule) %>%
-    summarise(avg.r = sum(units_N * ratio)/sum(units_N),
-              bestEcon_n = sum(totalunits.x),
-              current_n = sum(totalunits.y),
-              sy = year) %>%
-    filter(bestEcon_n >num_threshold & current_n >num_threshold)
-  return(result)
-}
-  
-inherit.fact<-function(df){
-  
-  col<-c('ClassificationId','avg.r','CS_ClassId', 'C_ClassId')
-  
-  glob <- merge(merge(df,comb_Out,by='Schedule'), AllClass,by='ClassificationId') %>%
-    filter(CategoryId.x %in% GlobalList & Level2 =='Category' & !is.na(avg.r)) %>%
-    summarise(mean(avg.r))
-  
-  
-  start.df<-merge(merge(df,comb_Out,by='Schedule'), AllClass,by='ClassificationId') %>% select(col)
-  
-  non_na.df <- start.df %>% filter(!is.na(avg.r))
-  
-  # M level inherit CS level
-  m.ih.cs <-merge(start.df %>% filter(is.na(avg.r) & !is.na(CS_ClassId)) %>% select(ClassificationId,CS_ClassId,C_ClassId)
-                  ,non_na.df %>% select(c('ClassificationId',avg.r)),by.x='CS_ClassId',by.y='ClassificationId') %>% select(col)
-  
-  # CSlevel inherit C level 
-  cs.ih.c<- merge(anti_join(start.df,rbind(non_na.df,m.ih.cs),by='ClassificationId') %>% select(-avg.r)
-                  ,non_na.df %>% select(c('ClassificationId',avg.r)),by.x='C_ClassId',by.y='ClassificationId') %>% select(col)
-  
-  # remaining inherit global
-  ih.glob<- anti_join(start.df,rbind(non_na.df,m.ih.cs,cs.ih.c),by='ClassificationId') %>%
-    mutate(avg.r = as.factor(glob))
-  
-  return(rbind(non_na.df,m.ih.cs,cs.ih.c,ih.glob))}
-
-
-### build a function to do MoM limitation 
-MoMlimit <- function(last_month,current_month,limit){
-  upline = last_month + limit
-  btline = last_month - limit
-  result = ifelse(is.na(last_month), current_month,pmin(upline,pmax(btline,current_month)))
-  return(result)
-}
+## run functions
+runfunc<-parse('functions.r')
+eval(runfunc)
 ################################### Read input file ##########################################
 ### load the inputfeed file
-In<-data.frame(read_excel(excelfile,sheet='In')) %>% filter(Country==CountryCode) %>% select(-ClassificationId,-Plot,-CategoryName,-SubcategoryName,-MakeName,-CSMM,-ValidSchedule)
-InR<-data.frame(read_excel(excelfile,sheet='InR')) %>% filter(Country==CountryCode) %>% select(-ClassificationId,-Plot,-CategoryName,-SubcategoryName,-MakeName,-CSMM,-ValidSchedule,-CheckJoin) %>% 
+In<-data.frame(read.xlsx(excelfile,sheetName='In')) %>% filter(Country==CountryCode) %>% select(-ClassificationId,-Plot,-CategoryName,-SubcategoryName,-MakeName,-CSMM,-ValidSchedule)
+InR<-data.frame(read.xlsx(excelfile,sheetName='InR')) %>% filter(Country==CountryCode) %>% select(-ClassificationId,-Plot,-CategoryName,-SubcategoryName,-MakeName,-CSMM,-ValidSchedule,-CheckJoin) %>% 
   filter(BorrowType=='RetailBorrowAuction')
 
 inAll <- rbind(In,InR %>% select(-BorrowSchedule,-BorrowType))
 
 SchedFullList<-inAll %>% select(Schedule) %>% distinct()
 
-Out<-data.frame(read_excel(excelfile,sheet='Out')) %>% filter(Country==CountryCode)
-OutR<-data.frame(read_excel(excelfile,sheet='OutR')) %>% filter(Country==CountryCode & str_detect(Schedule,' RbA ')) 
+Out<-data.frame(read.xlsx(excelfile,sheetName='Out')) %>% filter(Country==CountryCode)
+OutR<-data.frame(read.xlsx(excelfile,sheetName='OutR')) %>% filter(Country==CountryCode & str_detect(Schedule,' RbA ')) 
 ### Application tab
 comb_Out<-rbind(Out %>% select(ClassificationId, Schedule, CategoryId,SubcategoryId, SubcategoryName,Level2,Plot),OutR %>% select(ClassificationId, Schedule, CategoryId,SubcategoryId,SubcategoryName,Level2,Plot))
 
@@ -247,36 +177,81 @@ comb_recession<-sched.aggr(recessionYr.ret,inAll,'Retail','') %>%
             avg = sum(Units*SPCost)/sum(Units)) 
 
 # best
-comb_best<-sched.aggr(bestYr.ret,inAll,'Retail','best')  %>%
+comb_best<-sched.aggr(bestYr.ret,inAll,'Retail','best') %>%
   group_by(Schedule,SaleYear, yearAge) %>%
   summarise(totalunits = sum(Units),
             avg = sum(Units*SPCost)/sum(Units))
 
+joinretail_cur<-sched.aggr(currentYr.ret,inAll,'Retail','current')
 # current
-comb_current<-sched.aggr(currentYr.ret,inAll,'Retail','') %>%
+comb_current<-joinretail_cur %>%
   group_by(Schedule, yearAge) %>%
   summarise(totalunits = sum(Units),
             avg = sum(Units*SPCost)/sum(Units)) 
 
+################ Calculate the recency factor ####################3
 
+comb_currentMonth<-merge(joinretail_cur %>% 
+  filter(as.Date(SaleMonth) %in% c(MbefpubDate, publishDate)) %>%
+  group_by(Schedule, ModelYear) %>%
+  summarise(units.recent = sum(Units),
+            avg.recent = sum(Units*SPCost)/sum(Units)),
+  joinretail_cur %>% 
+    group_by(Schedule, ModelYear) %>%
+    summarise(totalunits = sum(Units),
+              avg = sum(Units*SPCost)/sum(Units)),by=c('Schedule','ModelYear')) %>%
+  mutate(depr = avg*(.99)^5.5) %>%
+  mutate(factor = depr/avg.recent,
+         mincounts = pmin(totalunits,units.recent),
+         sumcounts = totalunits+units.recent)
+         
+avgMinN.recentF <- comb_currentMonth %>%
+  group_by(Schedule) %>%
+  summarise(avg.mincount = mean(mincounts))
+
+
+recent.ret.factor<-merge(comb_currentMonth, avgMinN.recentF,by='Schedule')%>% 
+  mutate(weight = (mincounts/avg.mincount)*sumcounts) %>%
+  group_by(Schedule) %>%
+  summarise(recFactor_v0 = sum(factor*weight) /sum(weight),
+            n = sum(units.recent)) %>%
+  ## cap the factor by number of data
+  mutate(recFactor_v1 = ifelse(n>num_threshold, 1*recFactor_v0, ((num_threshold-n)+n*recFactor_v0)/num_threshold)) %>%
+  mutate(recFactor = ifelse(recFactor_v1<1,pmax(((num_threshold-n)+n*.8)/num_threshold,recFactor_v1),pmin(((num_threshold-n)+n*1.2)/num_threshold,recFactor_v1)))
 
 
 ############## Worst Econ
-## join worst year and current year & calculate the worst econ factor
-worstEcon_calc<-merge(comb_recession,comb_current,by=c('Schedule','yearAge')) %>%
-  mutate(ratio = avg.x/avg.y, units_N = totalunits.x + totalunits.y) %>%
+## calculate the ratio of recession year/ current year, as well as min unit counts and sum unit counts 
+worstEcon_calc_s1<-merge(comb_recession,comb_current,by=c('Schedule','yearAge')) %>%
+  mutate(ratio = avg.x/avg.y,
+         mincounts = pmin(totalunits.x , totalunits.y),
+         sumcounts = totalunits.x + totalunits.y)
+
+## average the min unit counts
+avgMincounts<-worstEcon_calc_s1 %>%
+  group_by(Schedule) %>%
+  summarise(avg.mincount = mean(mincounts))
+
+## join the above table back and do the weighted average
+worstEcon_calc<-merge(worstEcon_calc_s1,avgMincounts,by = 'Schedule') %>%
+  mutate(units_N = (mincounts/avg.mincount)*sumcounts) %>%
   group_by(Schedule) %>%
   summarise(avg.r = sum(units_N * ratio)/sum(units_N),
             recession_n = sum(totalunits.x),
             current_n = sum(totalunits.y)) %>%
   filter(recession_n >num_threshold & current_n >num_threshold)
 
+
 ## join to the schedule list
 WorstEcon_out<-merge(worstEcon_calc,SchedFullList,by='Schedule',all.y=T) 
 
+
+retRecent_out <- merge(recent.ret.factor,comb_Out,by='Schedule',all.y=T) %>% select(ClassificationId,recFactor)
+retRecent_out[is.na(retRecent_out)]<-1
+
 ## results table
-WE_outvf<-inherit.fact(WorstEcon_out) %>%
-  mutate(SFWorstRetail = pmin(avg.r, WorstEcon_cap)) %>%
+WE_outvf<-merge(inherit.fact(WorstEcon_out),retRecent_out,by='ClassificationId',all.y=T) %>%
+  mutate(SFWorstRetail = pmin(as.numeric(avg.r)*recFactor, WorstEcon_cap)) %>%
   select(ClassificationId,SFWorstRetail)
 
 
@@ -297,13 +272,12 @@ bestYr.ret.pick<-rbind(comb_best.2018,comb_best.2017,comb_best.2016) %>%
 
 BestEcon_out<-merge(bestYr.ret.pick,SchedFullList,by='Schedule',all.y=T) %>% select(Schedule,avg.r)
 
+
+
 ## combine & cap
-BE_outvf<-inherit.fact(BestEcon_out) %>%
-  mutate(SFBestRetail = pmax(BestEcon_cap,avg.r)) %>%
+BE_outvf<-merge(inherit.fact(BestEcon_out),retRecent_out,by='ClassificationId',all.y=T) %>%
+  mutate(SFBestRetail = pmax(BestEcon_cap,as.numeric(avg.r)*recFactor)) %>%
   select(ClassificationId,SFBestRetail)
-
-
-
 
 
 
@@ -358,43 +332,21 @@ BestEcon_out.auc<-merge(BestYref.auc,SchedFullList,by='Schedule',all.y=T) %>% se
 
 
 ## combine & cap
-BE_outvf.auc<-merge(inherit.fact(BestEcon_out.auc),BE_outvf,by='ClassificationId') %>%
+BE_outvf.auc<-merge(inherit.fact(BestEcon_out.auc),BE_outvf,by='ClassificationId',all.y=T) %>%
   mutate(SFBestAuction = as.numeric(avg.r) * as.numeric(SFBestRetail)) %>%
   select(ClassificationId,SFBestAuction)
 
-"""
-AllClass<-'
+##### Data Validation
 
-
-  SELECT [ClassificationId]
-      ,[CategoryId]
-      
-  FROM [ras_sas].[BI].[Classifications]
-  Where  Modelid is null
-
-  Order By 
-      [ClassificationId]
-      ,[CategoryId]'
-      
-Allclass<-sqlQuery(channel,AllClass) 
-
-residTbmerge<-merge(merge(merge(merge(join_out,BE_outvf,by='ClassificationId'), WE_outvf ,by='ClassificationId'), BE_outvf.auc,by='ClassificationId'),WE_outvf.auc,by='ClassificationId') 
-residTb<-merge(Allclass,residTbmerge,by='ClassificationId') %>%
-  mutate(SFWorstAuction = ifelse(CategoryId %in% c(2515, 360, 29, 362, 15, 6, 2509, 2505, 32, 2599, 164),SFWorstAuction / .96, ifelse(CategoryId ==2616, SFWorstAuction / .90,SFWorstAuction / .93)),
-         SFBestAuction = ifelse(CategoryId %in% c(2515, 360, 29, 362, 15, 6, 2509, 2505, 32, 2599, 164),SFBestAuction / .96, ifelse(CategoryId ==2616, SFBestAuction / .90,SFBestAuction / .93))) %>%
-  mutate(SFWorstAuction = pmin(SFWorstAuction, WorstEcon_cap),
-         SFBestAuction = pmax(SFBestAuction,BestEcon_cap)) %>%
-  select(-CategoryId) %>%
-# best and worst are at least .15 apart. fix best and twist worst
-  mutate(SFWorstRetail = pmin(SFWorstRetail, as.numeric(SFBestRetail) - Econ_gap),SFWorstAuction = pmin(SFWorstAuction, as.numeric(SFBestAuction) - Econ_gap)) %>%
-  select(MarketCode,	ClassificationId,everything())
-
-"""
+dim(join_out)[1]==dim(BE_outvf)[1]
+dim(join_out)[1]==dim(WE_outvf)[1]
+dim(join_out)[1]==dim(BE_outvf.auc)[1]
+dim(join_out)[1]==dim(WE_outvf.auc)[1]
 ################################# Output file ###################################
 
 
 ## join best and worst econ factor; adjust worst econ factor with a limit gap to best econ factor
-residTb<-merge(merge(merge(merge(join_out,BE_outvf,by='ClassificationId'), WE_outvf ,by='ClassificationId'), BE_outvf.auc,by='ClassificationId'),WE_outvf.auc,by='ClassificationId') %>%
+residTb<-merge(merge(merge(merge(join_out,BE_outvf,by='ClassificationId'), WE_outvf ,by='ClassificationId'), BE_outvf.auc,by='ClassificationId',all.x=T),WE_outvf.auc,by='ClassificationId',all.x = T) %>%
   # best and worst are at least .15 apart. fix best and twist worst
   mutate(SFWorstRetail = pmin(SFWorstRetail, as.numeric(SFBestRetail) - Econ_gap),SFWorstAuction = pmin(SFWorstAuction, as.numeric(SFBestAuction) - Econ_gap)) %>%
   select(MarketCode,	ClassificationId,everything())
@@ -426,4 +378,4 @@ residualOutput<- share_page %>%
 
 write.csv(residualOutput,paste('ResidualFactor',format(Sys.time(), "%Y%m%d%H%M"),'VL.csv',sep=''),row.names=FALSE)
 
-write.csv(share_page,paste('share_page',format(Sys.time(), "%Y%m%d%H%M"),'VL.csv',sep=''),row.names=FALSE)
+write.xlsx(share_page,paste('share_page',format(Sys.time(), "%Y%m%d%H%M"),'VL.xlsx',sep=''),row.names=FALSE,sheetName = 'Sheet1')

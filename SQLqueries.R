@@ -4,6 +4,7 @@ uploadData.sql<-"
 	Declare @dateEffective DATE = CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1) AS date)
 	Declare @dateStart DATE = 	CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-145, -1) AS date)
 	
+	
 SELECT [CustomerAssetId]
       ,[CustomerId]
       ,[CustomerName]
@@ -27,7 +28,7 @@ SELECT [CustomerAssetId]
 			    OR CurrentABCostUSNA/Cost < 0.75+0.015*(YEAR(@dateEffective)-ModelYear + (MONTH(@dateEffective)-6)/12.00)) THEN 'EcxRegr'
              ELSE 'inUse' END AS 'Flag'
   FROM [ras_sas].[BI].[CustomerAssetsCost] 
-  WHERE  [IsUsedForABCost]='Y' and [IsPurchasedUsed]='N' 
+  WHERE  [IsUsedForABCostUSNA]='Y' and [IsPurchasedUsed]='N' 
     AND CategoryId Not In (220,	1948,	18,	4,	1949,	234,	21,	31,	2733,	2706,	2718,	2692,	2724,	2674,	2700,	2708)
     AND MakeId NOT in (58137,78) --Miscellaneous,Not Attributed,Various
 		AND NOT ([SubcategoryId] in (2806,2808,2001,2636) and makeid=31 and ModelName not like 'XQ%')  
@@ -40,7 +41,7 @@ SELECT [CustomerAssetId]
 recessionYr.ret.sql<-" SET NOCOUNT ON
 select  CategoryId,CategoryName, SubcategoryId,SubcategoryName, MakeId, MakeName,ModelYear,cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0)) as yearAge, avg(SalePrice/Cost) SPCost,Count(*) Units
 from [ras_sas].[BI].Comparables 
-where saletype = 'retail' and IsUsedForComparables='y'
+where saletype = 'retail' and IsUsedForComparablesUSNA='y'
 	  and SaleYear = 2009
 	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 >3
 	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 <10
@@ -58,12 +59,12 @@ group by CategoryId,CategoryName, SubcategoryId,SubcategoryName, MakeId, MakeNam
 currentYr.ret.sql<-" SET NOCOUNT ON
 Declare @dateStart DATE = CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, DATEADD(year,-1,GETDATE()))-1, -1) as date)
 Declare @dateEnd DATE = CAST(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1) AS date)
-
-SELECT  CategoryId,CategoryName, SubcategoryId,SubcategoryName,MakeId, MakeName, ModelYear, cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0)) as yearAge,avg(SalePrice/Cost) SPCost,Count(*) Units
+SELECT  CategoryId,CategoryName, SubcategoryId,SubcategoryName,MakeId, MakeName, ModelYear, EOMONTH(SaleDate) as SaleMonth,
+cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0)) as yearAge,avg(SalePrice/Cost) SPCost,Count(*) Units
 from [ras_sas].[BI].Comparables 
-where saletype = 'retail' and IsUsedForComparables='y'
-	  --and SaleDate >@dateStart and SaleDate<=@dateEnd
-	  and SaleDate>='2020-03-01' and SaleDate<='2020-03-31'
+where saletype = 'retail' and IsUsedForComparablesUSNA='y'
+	  and SaleDate >@dateStart and SaleDate<=@dateEnd
+	  --and SaleDate>='2020-03-01' and SaleDate<='2020-03-31'
 	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 >3
 	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 <10
 	  and cost /CurrentABCostUSNA<2 and cost/CurrentABCostUSNA>.5
@@ -73,13 +74,13 @@ where saletype = 'retail' and IsUsedForComparables='y'
 	  AND CategoryId Not In (220,	1948,	18,	4,	1949,	234,	21,	31,	2733,	2706,	2718,	2692,	2724,	2674,	2700,	2708)
       AND MakeId NOT in (58137,78) --Miscellaneous,Not Attributed,Various
       AND NOT ([SubcategoryId] in (2806,2808,2001,2636) and makeid=31 and ModelName not like 'XQ%')
-group by CategoryId,CategoryName, SubcategoryId,SubcategoryName, MakeId, MakeName, ModelYear,cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0))	"
+group by CategoryId,CategoryName, SubcategoryId,SubcategoryName, MakeId, MakeName, ModelYear,EOMONTH(SaleDate),cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0))	"
 
 
 bestYr.ret.sql<-" SET NOCOUNT ON
 	 select  CategoryId,CategoryName, SubcategoryId,SubcategoryName, MakeId, MakeName, SaleYear, ModelYear, cast(YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 as decimal(10,0)) as yearAge,avg(SalePrice/Cost) SPCost,Count(*) Units
 from [ras_sas].[BI].Comparables 
-where saletype = 'retail' and IsUsedForComparables='y'
+where saletype = 'retail' and IsUsedForComparablesUSNA='y'
 	  and SaleYear between 2016 and 2018
 	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 >3
 	  and YEAR(SaleDate)-ModelYear + (MONTH(SaleDate)-6)/12.00 <10
@@ -125,7 +126,6 @@ SELECT [ClassificationId]
 
 
 currentYr.auc.sql<-" SET NOCOUNT ON
-Declare @EffectiveDate Date = CAST(DATEADD(MONTH, DATEDIFF(MONTH, 0, GETDATE())-1, -1) AS date)
 
 SELECT [ClassificationId]
       ,[CategoryId]
@@ -134,13 +134,13 @@ SELECT [ClassificationId]
       ,[SubcategoryName]
       ,[MakeId]
       ,[MakeName]
-      ,[PublishYear]
+      ,year(DATEADD(MONTH, DATEDIFF(MONTH, -1, GETDATE())-1, -1)) as PublishYear
       ,[ModelYear]
       ,avg([FlvSchedulePercentage]) AvgFlv
       ,avg([FmvSchedulePercentage]) AvgFmv
-  FROM [ras_sas].[BI].[AppraisalBookClassificationValuesUSNA]
+  FROM [ras_sas].[BI].[ClassificationValuesInProgressUSNA]
 
-  where [AppraisalBookPublishDate] = @EffectiveDate and ModelId is null AND ModelYear between PublishYear-10 and PublishYear-3
+  where ModelId is null AND ModelYear between year(GETDATE()) -10 and year(GETDATE())-3
    AND CategoryId Not In (220,	1948,	18,	4,	1949,	234,	21,	31,	2733,	2706,	2718,	2692,	2724,	2674,	2700,	2708)
    AND MakeId NOT in (58137,78) --Miscellaneous,Not Attributed,Various
    Group By [ClassificationId]
@@ -150,7 +150,6 @@ SELECT [ClassificationId]
       ,[SubcategoryName]
       ,[MakeId]
       ,[MakeName]
-	  ,[PublishYear]
       ,[ModelYear]	"
 
 
