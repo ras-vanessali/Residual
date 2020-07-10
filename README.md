@@ -25,6 +25,7 @@ BI.AppraisalBookClassificationValuesUSNA
 BI.AppraisalBookResidFactorsMKT
 ```
 ### what data been used?
+What categories do we create residual value? - categories which we generate schedule, but the inherit mapping is not the same. bRA, RbA and AbR means nothing in residual.  
 a) residual factor:
 - uploadData: Cost data from BI.CustomerAssetsCost, rolling 12 years with cost greater than 10; purchase in new and is used for ABCost
 
