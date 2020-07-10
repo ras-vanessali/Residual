@@ -39,7 +39,7 @@ b) econ factor:
 #### retail econ factor:
 - worst: saleyear = 2019
 - current: rolling 12 months sales data
-- best: choose among 2016, 2017 and 2018 
+- best: choose the best economic market from year greather or equal to than 2015 and less than or equal to current year if passed June. If not, less than or equal to prior year. 
 
 #### auction econ factor:
 - worst: average schedules of 3/31/2009 to 12/31/2009, age between 3 to 10.
