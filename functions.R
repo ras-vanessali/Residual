@@ -48,7 +48,7 @@ bestEconfunc<- function(best.df,cur.df,year){
   result <- merge(jointable,mincount,by='Schedule') %>%
     mutate(units_N = (mincounts/avg.mincount)*sumcounts) %>%
     group_by(Schedule) %>% 
-    summarise(avg.r = sum(units_N * ratio)/sum(units_N),
+    summarise(factor = sum(units_N * ratio)/sum(units_N),
               bestEcon_n = sum(totalunits.x),
               current_n = sum(totalunits.y),
               sy = year) %>%
@@ -59,30 +59,38 @@ bestEconfunc<- function(best.df,cur.df,year){
 
 inherit.fact<-function(df){
   
-  col<-c('ClassificationId','avg.r','CS_ClassId', 'C_ClassId')
+  col<-c('ClassificationId','factor','CS_ClassId', 'C_ClassId')
   
   glob <- merge(merge(df,comb_Out,by='Schedule'), AllClass,by='ClassificationId') %>%
-    filter(CategoryId.x %in% GlobalList & Level2 =='Category' & !is.na(avg.r)) %>%
-    summarise(mean(avg.r))
+    filter(CategoryId %in% GlobalList & Level2 =='Category' & !is.na(factor)) %>%
+    summarise(mean(factor))
   
   
   start.df<-merge(merge(df,comb_Out,by='Schedule'), AllClass,by='ClassificationId') %>% select(col)
   
-  non_na.df <- start.df %>% filter(!is.na(avg.r))
+  non_na.df <- start.df %>% filter(!is.na(factor))
   
   # M level inherit CS level
-  m.ih.cs <-merge(start.df %>% filter(is.na(avg.r) & !is.na(CS_ClassId)) %>% select(ClassificationId,CS_ClassId,C_ClassId)
-                  ,non_na.df %>% select(c('ClassificationId',avg.r)),by.x='CS_ClassId',by.y='ClassificationId') %>% select(col)
+  m.ih.cs <-merge(start.df %>% filter(is.na(factor) & !is.na(CS_ClassId)) %>% select(ClassificationId,CS_ClassId,C_ClassId)
+                  ,non_na.df %>% select(c('ClassificationId',factor)),by.x='CS_ClassId',by.y='ClassificationId') %>% select(col)
   
   # CSlevel inherit C level 
-  cs.ih.c<- merge(anti_join(start.df,rbind(non_na.df,m.ih.cs),by='ClassificationId') %>% select(-avg.r)
-                  ,non_na.df %>% select(c('ClassificationId',avg.r)),by.x='C_ClassId',by.y='ClassificationId') %>% select(col)
+  cs.ih.c<- merge(anti_join(start.df,rbind(non_na.df,m.ih.cs),by='ClassificationId') %>% select(-factor)
+                  ,non_na.df %>% select(c('ClassificationId',factor)),by.x='C_ClassId',by.y='ClassificationId') %>% select(col)
   
   # remaining inherit global
   ih.glob<- anti_join(start.df,rbind(non_na.df,m.ih.cs,cs.ih.c),by='ClassificationId') %>%
-    mutate(avg.r = as.factor(glob))
+    mutate(factor = as.factor(glob))
   
   return(rbind(non_na.df,m.ih.cs,cs.ih.c,ih.glob))}
+
+## create the global value
+globvalue<-function(df){
+  glob <- merge(merge(df,comb_Out,by='Schedule'), AllClass,by='ClassificationId') %>%
+    filter(CategoryId %in% GlobalList & Level2 =='Category' & !is.na(factor)) %>%
+    summarise(mean(factor))
+  return(as.numeric(glob))
+}
 
 
 ### build a function to do MoM limitation 

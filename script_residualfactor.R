@@ -22,6 +22,7 @@ library(tidyr)
 library(tibble)
 library(lubridate)
 library(xlsx)
+library(readxl)
 library(stringr)
 
 ############################## Declare inputs #####################################
@@ -34,6 +35,8 @@ stdInd=3
 target_Age = 8
 num_threshold = 20
 
+halfyear.shift<-5.5
+
 GlobalList<-c(313,	6,	2509,	15,	29,	315,	360,	451,	316,	362)
 MoM_cap=0.02
 
@@ -41,16 +44,17 @@ cap_resid_low = 1.02
 cap_resid_hi = 1.25
 
 WorstEcon_cap =.98
-BestEcon_cap = 1.0005
+BestEcon_cap = 1.03
 
 Econ_gap = 0.15
 publishDate<-Sys.Date() - days(day(Sys.Date()))
 MbefpubDate<-publishDate%m-% months(1)
 
+GlobalClassId=1
 ## file path & read file name 
 file_path = "C:/Users/vanessa.li/Documents/GitHub/Residual"
 setwd(file_path)  
-excelfile = '20200506 SchedulesManagement.xlsx'
+excelfile = '20200623 SchedulesManagement.xlsx'
 
 ##################################### Load data #####################################
 runSQL<-parse('SQLqueries.r')
@@ -75,7 +79,7 @@ runfunc<-parse('functions.r')
 eval(runfunc)
 ################################### Read input file ##########################################
 ### load the inputfeed file
-In<-data.frame(read.xlsx(excelfile,sheetName='In')) %>% filter(Country==CountryCode) %>% select(-ClassificationId,-Plot,-CategoryName,-SubcategoryName,-MakeName,-CSMM,-ValidSchedule)
+In<-data.frame(read.xlsx(excelfile,sheetName='In')) %>% filter(Country==CountryCode) %>% select(-ClassificationId,-Plot,-CategoryName,-SubcategoryName,-MakeName,-CSMM,-ValidSchedule,-CanadaPlots)
 InR<-data.frame(read.xlsx(excelfile,sheetName='InR')) %>% filter(Country==CountryCode) %>% select(-ClassificationId,-Plot,-CategoryName,-SubcategoryName,-MakeName,-CSMM,-ValidSchedule,-CheckJoin) %>% 
   filter(BorrowType=='RetailBorrowAuction')
 
@@ -86,7 +90,7 @@ SchedFullList<-inAll %>% select(Schedule) %>% distinct()
 Out<-data.frame(read.xlsx(excelfile,sheetName='Out')) %>% filter(Country==CountryCode)
 OutR<-data.frame(read.xlsx(excelfile,sheetName='OutR')) %>% filter(Country==CountryCode & str_detect(Schedule,' RbA ')) 
 ### Application tab
-comb_Out<-rbind(Out %>% select(ClassificationId, Schedule, CategoryId,SubcategoryId, SubcategoryName,Level2,Plot),OutR %>% select(ClassificationId, Schedule, CategoryId,SubcategoryId,SubcategoryName,Level2,Plot))
+comb_Out<-rbind(Out %>% select(ClassificationId, Schedule, SubcategoryId, SubcategoryName,Level2,Plot),OutR %>% select(ClassificationId, Schedule, SubcategoryId,SubcategoryName,Level2,Plot))
 
 
 ######################################### Residual factors #################################################
@@ -127,7 +131,7 @@ Datainput<-unionData %>%
 SchedFullList = data.frame(Datainput) %>% select(Schedule) %>% distinct()
 N=dim(SchedFullList)[1]
 
-factor<-rep(0,N)
+factorresid<-rep(0,N)
 n<-rep(0,N)
 
 for (j in 1:N){
@@ -149,16 +153,19 @@ for (j in 1:N){
       model <-lm(log(CostRatio) ~ 0 + I(Age), remain)
     }
     
-    factor[j]<-exp(coef(model)[1]*target_Age)
+    factorresid[j]<-exp(coef(model)[1]*target_Age)
     n[j]<-ifelse(dim(remain)[1] ==0, dim(sched_data)[1], dim(remain)[1])
     
   }
 }  
 
-out<-data.frame(SchedFullList,n,factor)
+outregression<-data.frame(SchedFullList,n,factorresid) %>%
+  rename(factor=factorresid)
+
+resid.global = pmax(cap_resid_low,pmin(cap_resid_hi,globvalue(outregression))) 
 
 ## cap the residual factor
-cap_out <- out %>% 
+cap_out <- outregression %>% 
   mutate(cap_factor = pmax(cap_resid_low,pmin(cap_resid_hi,factor)))
 
 ## join to apply the factors to all classes in out tab
@@ -195,13 +202,13 @@ comb_currentMonth<-merge(joinretail_cur %>%
   filter(as.Date(SaleMonth) %in% c(MbefpubDate, publishDate)) %>%
   group_by(Schedule, ModelYear) %>%
   summarise(units.recent = sum(Units),
-            avg.recent = sum(Units*SPCost)/sum(Units)),
+            factorecent = sum(Units*SPCost)/sum(Units)),
   joinretail_cur %>% 
     group_by(Schedule, ModelYear) %>%
     summarise(totalunits = sum(Units),
               avg = sum(Units*SPCost)/sum(Units)),by=c('Schedule','ModelYear')) %>%
-  mutate(depr = avg*(.99)^5.5) %>%
-  mutate(factor = depr/avg.recent,
+  mutate(depr = avg*(.99)^halfyear.shift) %>%
+  mutate(factor = depr/factorecent,
          mincounts = pmin(totalunits,units.recent),
          sumcounts = totalunits+units.recent)
          
@@ -236,7 +243,7 @@ avgMincounts<-worstEcon_calc_s1 %>%
 worstEcon_calc<-merge(worstEcon_calc_s1,avgMincounts,by = 'Schedule') %>%
   mutate(units_N = (mincounts/avg.mincount)*sumcounts) %>%
   group_by(Schedule) %>%
-  summarise(avg.r = sum(units_N * ratio)/sum(units_N),
+  summarise(factor = sum(units_N * ratio)/sum(units_N),
             recession_n = sum(totalunits.x),
             current_n = sum(totalunits.y)) %>%
   filter(recession_n >num_threshold & current_n >num_threshold)
@@ -251,8 +258,9 @@ retRecent_out[is.na(retRecent_out)]<-1
 
 ## results table
 WE_outvf<-merge(inherit.fact(WorstEcon_out),retRecent_out,by='ClassificationId',all.y=T) %>%
-  mutate(SFWorstRetail = pmin(as.numeric(avg.r)*recFactor, WorstEcon_cap)) %>%
+  mutate(SFWorstRetail = pmin(as.numeric(factor)*recFactor, WorstEcon_cap)) %>%
   select(ClassificationId,SFWorstRetail)
+
 
 
 ############## Best Econ 
@@ -268,15 +276,15 @@ comb_best.2016 = bestEconfunc(comb_best,comb_current,2016)
 ### compare the three years and pick the max
 bestYr.ret.pick<-rbind(comb_best.2018,comb_best.2017,comb_best.2016) %>%
   group_by(Schedule) %>%
-  slice(which.max(avg.r))
+  slice(which.max(factor))
 
-BestEcon_out<-merge(bestYr.ret.pick,SchedFullList,by='Schedule',all.y=T) %>% select(Schedule,avg.r)
+BestEcon_out<-merge(bestYr.ret.pick,SchedFullList,by='Schedule',all.y=T) %>% select(Schedule,factor)
 
 
 
 ## combine & cap
 BE_outvf<-merge(inherit.fact(BestEcon_out),retRecent_out,by='ClassificationId',all.y=T) %>%
-  mutate(SFBestRetail = pmax(BestEcon_cap,as.numeric(avg.r)*recFactor)) %>%
+  mutate(SFBestRetail = pmax(BestEcon_cap,as.numeric(factor)*recFactor)) %>%
   select(ClassificationId,SFBestRetail)
 
 
@@ -287,43 +295,43 @@ BE_outvf<-merge(inherit.fact(BestEcon_out),retRecent_out,by='ClassificationId',a
 comb_recession.auc<-sched.aggr(recessionYr.auc,inAll,'Auction','') %>%
   group_by(Schedule, PublishYear) %>%
   summarise(avg.auc=mean(AvgFlv),
-            avg.ret=mean(AvgFmv)) %>%
-  mutate(recession.r = avg.auc/avg.ret)
+            factoret=mean(AvgFmv)) %>%
+  mutate(recession.r = avg.auc/factoret)
 
 ## best
 comb_best.auc<-sched.aggr(bestYr.auc,inAll,'Auction','') %>%
   group_by(Schedule, PublishYear) %>%
   summarise(avg.auc=mean(AvgFlv),
-            avg.ret=mean(AvgFmv)) %>%
-  mutate(best.r = avg.auc/avg.ret)
+            factoret=mean(AvgFmv)) %>%
+  mutate(best.r = avg.auc/factoret)
 
 ## current
 comb_current.auc<-sched.aggr(currentYr.auc,inAll,'Auction','') %>%
   group_by(Schedule, PublishYear) %>%
   summarise(avg.auc=mean(AvgFlv),
-            avg.ret=mean(AvgFmv)) %>%
-  mutate(current.r = avg.auc/avg.ret) 
+            factoret=mean(AvgFmv)) %>%
+  mutate(current.r = avg.auc/factoret) 
 
 
 ############## Worst Econ
 ## join worst year and current year & calculate the worst econ factor
 worstEcon_calc.auc<-merge(comb_recession.auc,comb_current.auc,by=c('Schedule')) %>%
-  mutate(avg.r = pmin(WorstEcon_cap,recession.r/current.r)) %>%
-  select(Schedule,avg.r)
+  mutate(factor = pmin(WorstEcon_cap,recession.r/current.r)) %>%
+  select(Schedule,factor)
 
 WorstEcon_out.auc<-merge(worstEcon_calc.auc,SchedFullList,by='Schedule',all.y=T) 
 
 
 ## combine
 WE_outvf.auc<-merge(inherit.fact(WorstEcon_out.auc),WE_outvf,by='ClassificationId') %>%
-  mutate(SFWorstAuction = as.numeric(avg.r) * as.numeric(SFWorstRetail)) %>%
+  mutate(SFWorstAuction = as.numeric(factor) * as.numeric(SFWorstRetail)) %>%
   select(ClassificationId,SFWorstAuction)
 
 
 ############## Best Econ 
 BestEcon_calc.auc<-merge(comb_best.auc,comb_current.auc,by=c('Schedule')) %>%
-  mutate(avg.r = pmax(BestEcon_cap,best.r/current.r)) %>%
-  select(Schedule,PublishYear.x,avg.r)
+  mutate(factor = pmax(BestEcon_cap,best.r/current.r)) %>%
+  select(Schedule,PublishYear.x,factor)
 
 
 BestYref.auc<-merge(bestYr.ret.pick %>% select(Schedule,sy),BestEcon_calc.auc,by.x=c('Schedule','sy'),by.y=c('Schedule','PublishYear.x'))
@@ -333,8 +341,10 @@ BestEcon_out.auc<-merge(BestYref.auc,SchedFullList,by='Schedule',all.y=T) %>% se
 
 ## combine & cap
 BE_outvf.auc<-merge(inherit.fact(BestEcon_out.auc),BE_outvf,by='ClassificationId',all.y=T) %>%
-  mutate(SFBestAuction = as.numeric(avg.r) * as.numeric(SFBestRetail)) %>%
+  mutate(SFBestAuction = as.numeric(factor) * as.numeric(SFBestRetail)) %>%
   select(ClassificationId,SFBestAuction)
+
+
 
 ##### Data Validation
 
@@ -346,18 +356,28 @@ dim(join_out)[1]==dim(WE_outvf.auc)[1]
 
 
 ## join best and worst econ factor; adjust worst econ factor with a limit gap to best econ factor
-residTb<-merge(merge(merge(merge(join_out,BE_outvf,by='ClassificationId'), WE_outvf ,by='ClassificationId'), BE_outvf.auc,by='ClassificationId',all.x=T),WE_outvf.auc,by='ClassificationId',all.x = T) %>%
+residTb<-merge(merge(merge(merge(join_out,BE_outvf,by='ClassificationId'), WE_outvf ,by='ClassificationId'), BE_outvf.auc,by='ClassificationId',all.x=T),WE_outvf.auc,by='ClassificationId',all.x = T) 
+
+## global values
+globalvalue<-data.frame(ClassificationId = GlobalClassId,
+                        MarketCode='USNA',
+                        ResidSF = resid.global,
+                        SFBestRetail = globvalue(BestEcon_out),
+                        SFWorstRetail = globvalue(WorstEcon_out),
+                        SFBestAuction = globvalue(BestEcon_out.auc),
+                        SFWorstAuction = globvalue(WorstEcon_out.auc))
+
+residTb_glob<-rbind(globalvalue,residTb) %>%
   # best and worst are at least .15 apart. fix best and twist worst
   mutate(SFWorstRetail = pmin(SFWorstRetail, as.numeric(SFBestRetail) - Econ_gap),SFWorstAuction = pmin(SFWorstAuction, as.numeric(SFBestAuction) - Econ_gap)) %>%
   select(MarketCode,	ClassificationId,everything())
-
 #### last month values 
 LMtb <-LastMonth %>% select(MarketCode,ClassificationId,ResidSf,RetailEconSfBest, RetailEconSfWorst, AuctionEconSfBest, AuctionEconSfWorst) %>%
   rename(Residlm = ResidSf)
 
 ## MoM limit applied - get the upload file ready
 
-share_page<- merge(residTb,LMtb,by=c('MarketCode','ClassificationId'),all.x=T) %>%
+share_page<- merge(residTb_glob,LMtb,by=c('MarketCode','ClassificationId'),all.x=T) %>%
   mutate(ResidSF = MoMlimit(Residlm,ResidSF,MoM_cap),	
          SFBestRetail= MoMlimit(RetailEconSfBest,SFBestRetail,MoM_cap),
          SFWorstRetail = MoMlimit(RetailEconSfWorst,SFWorstRetail,MoM_cap),
