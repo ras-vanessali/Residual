@@ -44,7 +44,7 @@ b) econ factor:
 #### auction econ factor:
 - worst: average schedules of 3/31/2009 to 12/31/2009, age between 3 to 10.
 - current: most recent publish (M1)
-- best: average schedules of either 2016 or 2017 or 2018; pick the best by comparison
+- best: best year has to be the same as retail. auction best is the average schedules of the year which retail picks as the best
 
 #### recency factor for econ factors (retail)
 - the factor will applied on the econ factor before capped 
