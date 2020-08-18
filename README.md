@@ -37,14 +37,22 @@ b) econ factor:
 - Cost greater than 5
 --------------------------------------
 #### retail econ factor:
-- worst: saleyear = 2019
+- worst: saleyear = 2009
 - current: rolling 12 months sales data
 - best: choose the best economic market from year greather or equal to than 2015 and less than or equal to current year if passed June. If not, less than or equal to prior year. 
 
 #### auction econ factor:
 - worst: average schedules of 3/31/2009 to 12/31/2009, age between 3 to 10.
-- current: most recent publish (M1)
-- best: best year has to be the same as retail. auction best is the average schedules of the year which retail picks as the best
+- current: most recent publish (in progress)
+- best: choose the best economic market from year greather or equal to than 2015 and less than or equal to current year if passed June. If not, less than or equal to prior year. 
+
+auction best econ facter: comparing the avg schedules in picked best year to current year. 
+note:
+1) If the schedules were not created back to 2015, 2015 must not be picked. The year should be picked from the years we have schedules created. ex:Excavator Medium Big JD is not found in 2015 and 2016. The best year would be picked from year after 2017
+2) If the schedules in the specific level were not created in that year, look for kids schedules under it. ex: box trailers category level schedule was not created in 2015 but cs, csm and csmm levels were created. Then use all schedules under box trailers. 
+
+#### inherit logic
+For each factor, if there is no data to compute the factor, if could inherit from its parent. csm inherits from cs; cs inherits from c; c inherit from global.
 
 #### recency factor for econ factors (retail)
 - the factor will applied on the econ factor before capped 
